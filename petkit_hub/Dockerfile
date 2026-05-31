@@ -1,5 +1,7 @@
-ARG BUILD_FROM=python:3.12-slim-bookworm
-FROM ${BUILD_FROM}
+# Fixed Debian base (glibc) — has pip and manylinux wheels for pydantic/pycryptodome,
+# so the build is fast and reliable. (Do NOT use ARG BUILD_FROM: the Supervisor injects
+# an Alpine base that has no pip.)
+FROM python:3.12-slim-bookworm
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
