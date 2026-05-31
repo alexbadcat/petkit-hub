@@ -45,6 +45,22 @@ def _rec_content(r, a, default=None):
     return getattr(getattr(r, "content", None), a, default) if r else default
 
 
+def _sprays_today(d):
+    """Count today's K3 spray_over events from device_records (Purifier.spray_times
+    is always 0 — the cloud doesn't maintain it; the real sprays are the events)."""
+    import time
+    recs = getattr(d, "device_records", None) or []
+    tzoff = (getattr(d, "timezone", 0) or 0) * 3600  # device tz offset, seconds
+    day_start = (int((time.time() + tzoff) // 86400)) * 86400 - tzoff
+    n = 0
+    for r in recs:
+        for sub in (getattr(r, "sub_content", None) or []):
+            if getattr(sub, "enum_event_type", None) == "spray_over":
+                if (getattr(sub, "timestamp", 0) or 0) >= day_start:
+                    n += 1
+    return n
+
+
 # --- derived values -----------------------------------------------------------
 def _state_str(d):
     st = getattr(d, "state", None)
@@ -153,13 +169,10 @@ class PuraMaxPlugin(PetkitPlugin):
 
     def entities(self, device: Any, entities_map: dict | None = None) -> list[Entity]:
         E = Entity
-        # linked K3 / Pura Air spray device (relate_t4 == this litter box)
-        em = entities_map or {}
-        k3_id = next((i for i, e in em.items() if getattr(e, "relate_t4", None) == device.id), None)
         ents = [
-            # K3 spray counter (read live from the linked purifier device)
+            # K3 spray counter = today's spray_over events (Purifier.spray_times is always 0)
             E("spray_times", "Spray times", "sensor", icon="mdi:spray",
-              value=lambda d, m=em, pid=k3_id: getattr(m.get(pid), "spray_times", None) if pid else None),
+              extra={"state_class": "total_increasing"}, value=_sprays_today),
             # sensors (ha-petkit-parity keys)
             E("state", "State", "sensor", icon="mdi:state-machine", value=_state_str),
             E("litter_level", "Litter level", "sensor", unit="%", icon="mdi:gauge",
