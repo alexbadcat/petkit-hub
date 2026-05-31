@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PetKit Hub</title>
+  <link rel="stylesheet" href="ui/style.css">
+</head>
+<body>
+  <header class="bar">
+    <div class="brand"><span class="logo">🐾</span> PetKit Hub</div>
+    <div id="mqtt" class="pill pill--muted">MQTT: …</div>
+  </header>
+
+  <main class="wrap">
+    <section class="card">
+      <div class="card__head">
+        <h2>Акаунти PetKit</h2>
+        <button id="addBtn" class="btn btn--accent">+ Додати акаунт</button>
+      </div>
+      <div id="accounts" class="list"></div>
+
+      <form id="addForm" class="form hidden">
+        <div class="grid">
+          <label>Email<input name="email" type="email" required placeholder="you@gmail.com"></label>
+          <label>Пароль<input name="password" type="password" required></label>
+          <label>Регіон<input name="region" value="UA" required></label>
+          <label>Часовий пояс<input name="timezone" value="Europe/Kyiv"></label>
+        </div>
+        <div class="form__actions">
+          <button type="button" id="cancelAdd" class="btn">Скасувати</button>
+          <button type="submit" class="btn btn--accent">Зберегти</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="card__head"><h2>Плагіни</h2></div>
+      <div id="plugins" class="list"></div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="ui/app.js"></script>
+</body>
+</html>
