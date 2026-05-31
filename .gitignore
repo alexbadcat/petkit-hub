@@ -1,0 +1,21 @@
+# secrets / runtime data — never commit credentials
+*.env
+.env
+secrets.yaml
+store.json
+data/
+*-token.txt
+devicecode.json
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
