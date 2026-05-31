@@ -30,6 +30,7 @@ runtime: Runtime | None = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global runtime
+    store.seed_from_options()
     runtime = Runtime()
     task = asyncio.create_task(runtime.run())
     log.info("PetKit Hub started (%d plugins)", len(runtime.plugins))

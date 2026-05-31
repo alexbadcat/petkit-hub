@@ -103,6 +103,26 @@ def remove_account(acc_id: str) -> bool:
 
 
 # --- plugins ------------------------------------------------------------------
+def seed_from_options() -> None:
+    """Seed a first account from add-on options (HA writes them to /data/options.json).
+
+    Lets a user (or headless deploy) provide bootstrap_email/password/region without
+    opening the UI. Only seeds when the store has no accounts yet.
+    """
+    opt = DATA_DIR / "options.json"
+    if not opt.exists():
+        return
+    try:
+        o = json.loads(opt.read_text("utf-8"))
+    except Exception:
+        return
+    email = (o.get("bootstrap_email") or "").strip()
+    pw = o.get("bootstrap_password") or ""
+    if email and pw and not _read()["accounts"]:
+        add_account(email, pw, o.get("bootstrap_region") or "UA",
+                    o.get("bootstrap_timezone") or "Europe/Kyiv")
+
+
 def plugin_enabled(slug: str, default: bool = True) -> bool:
     with _lock:
         return _read()["plugins"].get(slug, {}).get("enabled", default)

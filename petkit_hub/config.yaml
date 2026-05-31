@@ -19,5 +19,11 @@ services:
   - mqtt:need
 options:
   log_level: info
+  bootstrap_email: ""
+  bootstrap_password: ""
+  bootstrap_region: "UA"
 schema:
   log_level: list(debug|info|warning|error)?
+  bootstrap_email: str?
+  bootstrap_password: password?
+  bootstrap_region: str?
