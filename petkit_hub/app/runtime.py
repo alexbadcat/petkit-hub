@@ -137,7 +137,7 @@ class Runtime:
             if not store.plugin_enabled(plugin.slug):
                 continue
             try:
-                ents = {e.key: e for e in plugin.entities(device)}
+                ents = {e.key: e for e in plugin.entities(device, client.petkit_entities)}
                 meta = plugin.device_meta(device)
             except Exception as exc:  # noqa: BLE001
                 log.warning("plugin %s entities() failed for %s: %s", plugin.slug, dev_id, exc)

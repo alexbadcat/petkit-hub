@@ -151,9 +151,15 @@ class PuraMaxPlugin(PetkitPlugin):
     name = "PetKit Pura Max / Max 2"
     handles = {"t4"}
 
-    def entities(self, device: Any) -> list[Entity]:
+    def entities(self, device: Any, entities_map: dict | None = None) -> list[Entity]:
         E = Entity
+        # linked K3 / Pura Air spray device (relate_t4 == this litter box)
+        em = entities_map or {}
+        k3_id = next((i for i, e in em.items() if getattr(e, "relate_t4", None) == device.id), None)
         ents = [
+            # K3 spray counter (read live from the linked purifier device)
+            E("spray_times", "Spray times", "sensor", icon="mdi:spray",
+              value=lambda d, m=em, pid=k3_id: getattr(m.get(pid), "spray_times", None) if pid else None),
             # sensors (ha-petkit-parity keys)
             E("state", "State", "sensor", icon="mdi:state-machine", value=_state_str),
             E("litter_level", "Litter level", "sensor", unit="%", icon="mdi:gauge",

@@ -74,7 +74,9 @@ class PetkitPlugin:
         }
 
     # --- entities --------------------------------------------------------------
-    def entities(self, device: Any) -> list[Entity]:
+    def entities(self, device: Any, entities_map: dict | None = None) -> list[Entity]:
+        """Return entity descriptors. ``entities_map`` is the account's live
+        {id: device} dict (mutated in place each poll) for cross-device reads."""
         raise NotImplementedError
 
 
