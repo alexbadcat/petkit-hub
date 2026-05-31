@@ -1,8 +1,8 @@
 """PetKit Pura Max / Pura Max 2 (device_type ``t4``) plugin.
 
-Maps the cloud ``Litter`` model to Home Assistant entities and wires control
-buttons/switches/selects through the pypetkitapi command API.
-See ``DEV_NOTES.md`` for the reverse-engineered field & command reference.
+Entity keys are kept identical to the RobertD502 ha-petkit integration so the
+existing «Туалет Рижика» card + the `litter.yaml` health package work unchanged
+(drop-in replacement). See DEV_NOTES.md for the field/command reference.
 """
 from __future__ import annotations
 
@@ -18,51 +18,132 @@ from pypetkitapi.command import (
 from ...plugins_base import Entity, PetkitPlugin
 
 
-# --- small accessors ----------------------------------------------------------
-def _st(device: Any, attr: str, default: Any = None) -> Any:
-    return getattr(getattr(device, "state", None), attr, default)
+# --- accessors ----------------------------------------------------------------
+def _st(d, a, default=None):
+    return getattr(getattr(d, "state", None), a, default)
 
 
-def _cfg(device: Any, attr: str, default: Any = None) -> Any:
-    return getattr(getattr(device, "settings", None), attr, default)
+def _cfg(d, a, default=None):
+    return getattr(getattr(d, "settings", None), a, default)
 
 
-def _stats(device: Any, attr: str, default: Any = None) -> Any:
-    return getattr(getattr(device, "device_stats", None), attr, default)
+def _stats(d, a, default=None):
+    return getattr(getattr(d, "device_stats", None), a, default)
+
+
+def _latest_record(d):
+    recs = getattr(d, "device_records", None) or []
+    best, best_ts = None, -1
+    for r in recs:
+        ts = getattr(r, "timestamp", None) or 0
+        if getattr(r, "pet_name", None) and ts >= best_ts:
+            best, best_ts = r, ts
+    return best
+
+
+def _rec_content(r, a, default=None):
+    return getattr(getattr(r, "content", None), a, default) if r else default
+
+
+# --- derived values -----------------------------------------------------------
+def _state_str(d):
+    st = getattr(d, "state", None)
+    if st is None:
+        return "idle"
+    ws = getattr(st, "work_state", None)
+    if not ws:
+        return "idle"
+    mode = ws.get("workMode") if isinstance(ws, dict) else getattr(ws, "work_mode", getattr(ws, "workMode", None))
+    return {0: "cleaning", 1: "dumping", 2: "odor_removal", 3: "maintenance"}.get(mode, "cleaning")
+
+
+def _weight_kg(d):
+    g = _st(d, "sand_weight")
+    return round(g / 1000, 2) if isinstance(g, (int, float)) else None
+
+
+def _error(d):
+    code = _st(d, "error_code")
+    if not code:
+        return "no_error"
+    return _st(d, "error_msg") or _st(d, "error_detail") or str(code)
+
+
+def _n50_pct(d):
+    days = _st(d, "deodorant_left_days")
+    if not isinstance(days, (int, float)):
+        return None
+    return max(0, min(100, round(days / 30 * 100)))
+
+
+def _pet_weight_kg(d):
+    r = _latest_record(d)
+    g = _rec_content(r, "pet_weight")
+    return round(g / 1000, 2) if isinstance(g, (int, float)) else None
+
+
+def _last_duration(d):
+    r = _latest_record(d)
+    ti, to = _rec_content(r, "time_in"), _rec_content(r, "time_out")
+    return (to - ti) if isinstance(ti, (int, float)) and isinstance(to, (int, float)) else None
+
+
+def _last_used_by(d):
+    r = _latest_record(d)
+    return getattr(r, "pet_name", None) or "no_record_yet" if r else "no_record_yet"
+
+
+def _last_event(d):
+    r = _latest_record(d)
+    return getattr(r, "enum_event_type", None) or "no_events_yet" if r else "no_events_yet"
+
+
+def _k3(d, a, default=None):
+    return getattr(getattr(d, "k3_device", None), a, default)
 
 
 # --- command factories --------------------------------------------------------
 def _action(action: DeviceAction, lb: LBCommand):
-    async def _run(client, device, _payload):
+    async def run(client, device, _p):
         await client.send_api_request(device.id, DeviceCommand.CONTROL_DEVICE, {action: lb})
-    return _run
+    return run
 
 
 def _reset_n50():
-    async def _run(client, device, _payload):
+    async def run(client, device, _p):
         await client.send_api_request(device.id, LitterCommand.RESET_N50_DEODORIZER)
-    return _run
+    return run
 
 
-def _switch(api_key: str):
-    async def _run(client, device, payload):
-        await client.send_api_request(
-            device.id, DeviceCommand.UPDATE_SETTING, {api_key: 1 if payload == "ON" else 0}
-        )
-    return _run
+def _set(api_key: str, on_val=1, off_val=0):
+    async def run(client, device, payload):
+        await client.send_api_request(device.id, DeviceCommand.UPDATE_SETTING,
+                                       {api_key: on_val if payload == "ON" else off_val})
+    return run
 
 
-def _select(api_key: str, options: dict[str, int]):
-    async def _run(client, device, payload):
-        if payload in options:
-            await client.send_api_request(
-                device.id, DeviceCommand.UPDATE_SETTING, {api_key: options[payload]}
-            )
-    return _run
+def _power_cmd():
+    async def run(client, device, payload):
+        await client.send_api_request(device.id, DeviceCommand.POWER, 1 if payload == "ON" else 0)
+    return run
 
 
-SAND_TYPES = {"Bentonite": 1, "Tofu": 2, "Mixed": 3}
-SAND_TYPES_REV = {v: k for k, v in SAND_TYPES.items()}
+def _select_sand():
+    opts = {"bentonite": 1, "tofu": 2, "mixed": 3}
+
+    async def run(client, device, payload):
+        if payload in opts:
+            await client.send_api_request(device.id, DeviceCommand.UPDATE_SETTING, {"sandType": opts[payload]})
+    return run
+
+
+SAND_REV = {1: "bentonite", 2: "tofu", 3: "mixed"}
+
+
+def _sw(key, name, snake, camel, icon=None):
+    """A settings switch: HA key `name`→slug, reads device.settings.<snake>, writes <camel>."""
+    return Entity(key, name, "switch", category="config", icon=icon,
+                  value=lambda d, s=snake: bool(_cfg(d, s)), command=_set(camel))
 
 
 class PuraMaxPlugin(PetkitPlugin):
@@ -71,83 +152,80 @@ class PuraMaxPlugin(PetkitPlugin):
     handles = {"t4"}
 
     def entities(self, device: Any) -> list[Entity]:
-        return [
-            # --- sensors ------------------------------------------------------
-            Entity("litter_percent", "Litter level", "sensor", unit="%",
-                   icon="mdi:gauge", value=lambda d: _st(d, "sand_percent")),
-            Entity("litter_weight", "Litter weight", "sensor", unit="g", device_class="weight",
-                   icon="mdi:weight-gram", value=lambda d: _st(d, "sand_weight")),
-            Entity("used_times", "Uses", "sensor", icon="mdi:counter",
-                   value=lambda d: _st(d, "used_times")),
-            Entity("times_today", "Uses today", "sensor", icon="mdi:counter",
-                   value=lambda d: _stats(d, "times")),
-            Entity("avg_time", "Avg visit", "sensor", unit="s", device_class="duration",
-                   icon="mdi:timer-outline", value=lambda d: _stats(d, "avg_time")),
-            Entity("battery", "Battery", "sensor", unit="%", device_class="battery",
-                   category="diagnostic", value=lambda d: _st(d, "battery")),
-            Entity("liquid", "Pura Air liquid", "sensor", unit="%", icon="mdi:spray",
-                   value=lambda d: _st(d, "liquid")),
-            Entity("deodorant_left_days", "N50 days left", "sensor", unit="d",
-                   icon="mdi:calendar-clock", value=lambda d: _st(d, "deodorant_left_days")),
-            Entity("spray_left_days", "Spray days left", "sensor", unit="d",
-                   icon="mdi:calendar-clock", category="diagnostic",
-                   value=lambda d: _st(d, "spray_left_days")),
-            Entity("error", "Error", "sensor", category="diagnostic", icon="mdi:alert-circle",
-                   value=lambda d: _st(d, "error_msg") or _st(d, "error_code") or "OK"),
-            Entity("sand_type_state", "Litter type", "sensor", icon="mdi:dots-grid",
-                   category="diagnostic",
-                   value=lambda d: SAND_TYPES_REV.get(_st(d, "sand_type"), "—")),
-
-            # --- binary sensors ----------------------------------------------
-            Entity("box_full", "Waste bin full", "binary_sensor", device_class="problem",
-                   value=lambda d: bool(_st(d, "box_full"))),
-            Entity("liquid_lack", "Liquid low", "binary_sensor", device_class="problem",
-                   value=lambda d: bool(_st(d, "liquid_lack"))),
-            Entity("sand_lack", "Litter low", "binary_sensor", device_class="problem",
-                   value=lambda d: bool(_st(d, "sand_lack"))),
-            Entity("low_power", "Low power", "binary_sensor", device_class="battery",
-                   category="diagnostic", value=lambda d: bool(_st(d, "low_power"))),
-
-            # --- buttons (actions) -------------------------------------------
-            Entity("clean", "Clean now", "button", icon="mdi:broom",
-                   command=_action(DeviceAction.START, LBCommand.CLEANING)),
-            Entity("odor", "Deodorize", "button", icon="mdi:scent",
-                   command=_action(DeviceAction.START, LBCommand.ODOR_REMOVAL)),
-            Entity("dump", "Dump litter", "button", icon="mdi:delete-empty",
-                   command=_action(DeviceAction.START, LBCommand.DUMPING)),
-            Entity("maintenance_start", "Maintenance start", "button", icon="mdi:wrench",
-                   command=_action(DeviceAction.START, LBCommand.MAINTENANCE)),
-            Entity("maintenance_stop", "Maintenance stop", "button", icon="mdi:wrench-outline",
-                   command=_action(DeviceAction.END, LBCommand.MAINTENANCE)),
-            Entity("light", "Light", "button", icon="mdi:lightbulb",
-                   command=_action(DeviceAction.START, LBCommand.LIGHT)),
-            Entity("reset_n50", "Reset N50", "button", category="config", icon="mdi:restart",
-                   command=_reset_n50()),
-
-            # --- switches (settings) -----------------------------------------
-            Entity("auto_work", "Auto cleaning", "switch", category="config",
-                   value=lambda d: bool(_cfg(d, "auto_work")), command=_switch("autoWork")),
-            Entity("avoid_repeat", "Avoid repeat cleaning", "switch", category="config",
-                   value=lambda d: bool(_cfg(d, "avoid_repeat")), command=_switch("avoidRepeat")),
-            Entity("deep_clean", "Deep cleaning", "switch", category="config",
-                   value=lambda d: bool(_cfg(d, "deep_clean")), command=_switch("deepClean")),
-            Entity("bury", "Waste covering", "switch", category="config",
-                   value=lambda d: bool(_cfg(d, "bury")), command=_switch("bury")),
-            Entity("kitten", "Kitten mode", "switch", category="config",
-                   value=lambda d: bool(_cfg(d, "kitten")), command=_switch("kitten")),
-            Entity("disturb_mode", "Do not disturb", "switch", category="config",
-                   value=lambda d: bool(_cfg(d, "disturb_mode")), command=_switch("disturbMode")),
-            Entity("manual_lock", "Child lock", "switch", category="config",
-                   value=lambda d: bool(_cfg(d, "manual_lock")), command=_switch("manualLock")),
-            Entity("auto_spray", "Auto spray", "switch", category="config",
-                   value=lambda d: bool(_cfg(d, "auto_spray")), command=_switch("autoSpray")),
-
-            # --- select -------------------------------------------------------
-            Entity("sand_type", "Litter type", "select", category="config",
-                   options=list(SAND_TYPES), icon="mdi:dots-grid",
-                   value=lambda d: SAND_TYPES_REV.get(_cfg(d, "sand_type"), "Bentonite"),
-                   command=_select("sandType", SAND_TYPES)),
+        E = Entity
+        ents = [
+            # sensors (ha-petkit-parity keys)
+            E("state", "State", "sensor", icon="mdi:state-machine", value=_state_str),
+            E("litter_level", "Litter level", "sensor", unit="%", icon="mdi:gauge",
+              value=lambda d: _st(d, "sand_percent")),
+            E("litter_weight", "Litter weight", "sensor", unit="kg", device_class="weight",
+              value=_weight_kg),
+            E("times_used", "Times used", "sensor", icon="mdi:counter",
+              value=lambda d: _st(d, "used_times")),
+            E("average_use", "Average use", "sensor", unit="s", device_class="duration",
+              value=lambda d: _stats(d, "avg_time")),
+            E("total_use", "Total use", "sensor", unit="s", device_class="duration",
+              value=lambda d: _stats(d, "total_time") or getattr(d, "total_time", None)),
+            E("last_used_by", "Last used by", "sensor", icon="mdi:paw", value=_last_used_by),
+            E("last_event", "Last event", "sensor", icon="mdi:history", value=_last_event),
+            E("error", "Error", "sensor", category="diagnostic", icon="mdi:alert-circle", value=_error),
+            E("pura_air_liquid", "Pura air liquid", "sensor", unit="%", icon="mdi:water-opacity",
+              value=lambda d: _st(d, "liquid")),
+            E("n50_odor_eliminator", "N50 odor eliminator", "sensor", unit="%", icon="mdi:scent",
+              value=_n50_pct),
+            E("pura_air_battery", "Pura air battery", "sensor", unit="%", device_class="battery",
+              category="diagnostic", value=lambda d: _k3(d, "battery")),
+            E("rssi", "Rssi", "sensor", unit="dBm", device_class="signal_strength",
+              category="diagnostic", value=lambda d: getattr(_st(d, "wifi"), "rsq", None)),
+            # binary
+            E("wastebin", "Wastebin", "binary_sensor", device_class="problem",
+              value=lambda d: bool(_st(d, "box_full"))),
+            E("litter", "Litter", "binary_sensor", device_class="problem",
+              value=lambda d: bool(_st(d, "sand_lack"))),
+            # pet entities (renamed to sensor.rizhik_* post-deploy)
+            E("pet_latest_weight", "Pet latest weight", "sensor", unit="kg", device_class="weight",
+              value=_pet_weight_kg),
+            E("pet_last_use_duration", "Pet last use duration", "sensor", unit="s",
+              device_class="duration", value=_last_duration),
+            # buttons
+            E("start_resume_cleaning", "Start resume cleaning", "button", icon="mdi:broom",
+              command=_action(DeviceAction.START, LBCommand.CLEANING)),
+            E("odor_removal", "Odor removal", "button", icon="mdi:spray",
+              command=_action(DeviceAction.START, LBCommand.ODOR_REMOVAL)),
+            E("dump_litter", "Dump litter", "button", icon="mdi:delete-sweep",
+              command=_action(DeviceAction.START, LBCommand.DUMPING)),
+            E("turn_light_on", "Turn light on", "button", icon="mdi:lightbulb-on",
+              command=_action(DeviceAction.START, LBCommand.LIGHT)),
+            E("start_maintenance_mode", "Start maintenance mode", "button", icon="mdi:wrench",
+              command=_action(DeviceAction.START, LBCommand.MAINTENANCE)),
+            E("exit_maintenance_mode", "Exit maintenance mode", "button", icon="mdi:exit-to-app",
+              command=_action(DeviceAction.END, LBCommand.MAINTENANCE)),
+            E("reset_n50_odor_eliminator", "Reset n50 odor eliminator", "button", category="config",
+              icon="mdi:restore", command=_reset_n50()),
+            E("reset_pura_air_liquid", "Reset pura air liquid", "button", category="config",
+              icon="mdi:restore", command=_set("liquidReset", on_val=1)),
+            # switches
+            _sw("auto_cleaning", "Auto cleaning", "auto_work", "autoWork", "mdi:autorenew"),
+            _sw("periodic_cleaning", "Periodic cleaning", "fixed_time_clear", "fixedTimeClear"),
+            _sw("avoid_repeat_cleaning", "Avoid repeat cleaning", "avoid_repeat", "avoidRepeat"),
+            _sw("continuous_rotation", "Continuous rotation", "downpos", "downpos"),
+            _sw("deep_cleaning", "Deep cleaning", "deep_clean", "deepClean"),
+            _sw("light_weight_cleaning_disabled", "Light weight cleaning disabled", "underweight", "underweight"),
+            _sw("kitten_mode", "Kitten mode", "kitten", "kitten"),
+            _sw("auto_odor_removal", "Auto odor removal", "auto_spray", "autoSpray"),
+            _sw("periodic_odor_removal", "Periodic odor removal", "fixed_time_spray", "fixedTimeSpray"),
+            _sw("deep_deodorization", "Deep deodorization", "deep_refresh", "deepRefresh"),
+            _sw("child_lock", "Child lock", "manual_lock", "manualLock"),
+            _sw("do_not_disturb", "Do not disturb", "disturb_mode", "disturbMode"),
+            E("power", "Power", "switch", category="config", icon="mdi:power",
+              value=lambda d: bool(_st(d, "power")), command=_power_cmd()),
+            # select
+            E("litter_type", "Litter type", "select", category="config",
+              options=["bentonite", "tofu", "mixed"], icon="mdi:cube-outline",
+              value=lambda d: SAND_REV.get(_cfg(d, "sand_type"), "bentonite"),
+              command=_select_sand()),
         ]
+        return ents
 
 
 PLUGIN = PuraMaxPlugin()

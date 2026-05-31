@@ -205,7 +205,7 @@ class Runtime:
             if isinstance(v, bool):
                 v = "ON" if v else "OFF"
             state[key] = v
-        await self._mqtt.publish(M.state_topic(dctx.device_id), json.dumps(state, default=str))
+        await self._mqtt.publish(M.state_topic(dctx.device_id), json.dumps(state, default=str), retain=True)
 
     async def _poll_once(self) -> None:
         for ctx in list(self._accounts.values()):
