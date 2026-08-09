@@ -219,6 +219,8 @@ class PuraMaxPlugin(PetkitPlugin):
               command=_action(DeviceAction.START, LBCommand.DUMPING)),
             E("turn_light_on", "Turn light on", "button", icon="mdi:lightbulb-on",
               command=_action(DeviceAction.START, LBCommand.LIGHT)),
+            E("calibrate", "Calibrate", "button", icon="mdi:scale-balance",
+              command=_action(DeviceAction.START, LBCommand.CALIBRATING)),
             E("start_maintenance_mode", "Start maintenance mode", "button", icon="mdi:wrench",
               command=_action(DeviceAction.START, LBCommand.MAINTENANCE)),
             E("exit_maintenance_mode", "Exit maintenance mode", "button", icon="mdi:exit-to-app",
