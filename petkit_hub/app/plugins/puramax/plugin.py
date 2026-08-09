@@ -18,6 +18,20 @@ from pypetkitapi.command import (
 from ...plugins_base import Entity, PetkitPlugin
 
 
+# --- cats ---------------------------------------------------------------------
+# Cloud pet attribution (record.pet_name) is unreliable → classify visits by weight.
+NOISE_MIN_G = 250
+KITTEN_MAX_G = 3000
+CATS = {
+    "rizhik": ("Рижик", KITTEN_MAX_G, float("inf")),
+    "shlopa": ("Шльопа", NOISE_MIN_G, KITTEN_MAX_G),
+}
+
+
+def _rng(slug):
+    return CATS[slug][1], CATS[slug][2]
+
+
 # --- accessors ----------------------------------------------------------------
 def _st(d, a, default=None):
     return getattr(getattr(d, "state", None), a, default)
@@ -61,6 +75,32 @@ def _sprays_today(d):
     return n
 
 
+def _in_range(r, lo, hi):
+    g = _rec_content(r, "pet_weight")
+    return isinstance(g, (int, float)) and lo <= g < hi
+
+
+def _cat_latest_record(d, lo, hi):
+    """Latest visit whose weighed pet falls into [lo, hi) grams — no pet_name needed."""
+    best, best_ts = None, -1
+    for r in getattr(d, "device_records", None) or []:
+        ts = getattr(r, "timestamp", None) or 0
+        if _in_range(r, lo, hi) and ts >= best_ts:
+            best, best_ts = r, ts
+    return best
+
+
+def _cat_visits_today(d, lo, hi):
+    import time
+    tzoff = (getattr(d, "timezone", 0) or 0) * 3600
+    day_start = (int((time.time() + tzoff) // 86400)) * 86400 - tzoff
+    n = 0
+    for r in getattr(d, "device_records", None) or []:
+        if _in_range(r, lo, hi) and (getattr(r, "timestamp", 0) or 0) >= day_start:
+            n += 1
+    return n
+
+
 # --- derived values -----------------------------------------------------------
 def _state_str(d):
     st = getattr(d, "state", None)
@@ -92,21 +132,30 @@ def _n50_pct(d):
     return max(0, min(100, round(days / 30 * 100)))
 
 
-def _pet_weight_kg(d):
-    r = _latest_record(d)
-    g = _rec_content(r, "pet_weight")
+def _cat_weight_kg(d, slug):
+    g = _rec_content(_cat_latest_record(d, *_rng(slug)), "pet_weight")
     return round(g / 1000, 2) if isinstance(g, (int, float)) else None
 
 
-def _last_duration(d):
-    r = _latest_record(d)
+def _cat_duration(d, slug):
+    r = _cat_latest_record(d, *_rng(slug))
     ti, to = _rec_content(r, "time_in"), _rec_content(r, "time_out")
     return (to - ti) if isinstance(ti, (int, float)) and isinstance(to, (int, float)) else None
 
 
+def _pet_weight_kg(d):
+    return _cat_weight_kg(d, "rizhik")
+
+
+def _last_duration(d):
+    return _cat_duration(d, "rizhik")
+
+
 def _last_used_by(d):
-    r = _latest_record(d)
-    return getattr(r, "pet_name", None) or "no_record_yet" if r else "no_record_yet"
+    g = _rec_content(_cat_latest_record(d, NOISE_MIN_G, float("inf")), "pet_weight")
+    if not isinstance(g, (int, float)):
+        return "no_record_yet"
+    return CATS["rizhik"][0] if g >= KITTEN_MAX_G else CATS["shlopa"][0]
 
 
 def _last_event(d):
@@ -212,6 +261,16 @@ class PuraMaxPlugin(PetkitPlugin):
               value=_pet_weight_kg),
             E("pet_last_use_duration", "Pet last use duration", "sensor", unit="s",
               device_class="duration", value=_last_duration),
+            E("shlopa_latest_weight", "Shlopa latest weight", "sensor", unit="kg",
+              device_class="weight", value=lambda d: _cat_weight_kg(d, "shlopa")),
+            E("shlopa_last_use_duration", "Shlopa last use duration", "sensor", unit="s",
+              device_class="duration", value=lambda d: _cat_duration(d, "shlopa")),
+            E("rizhik_visits_today", "Rizhik visits today", "sensor", icon="mdi:paw",
+              extra={"state_class": "total_increasing"},
+              value=lambda d: _cat_visits_today(d, *_rng("rizhik"))),
+            E("shlopa_visits_today", "Shlopa visits today", "sensor", icon="mdi:paw",
+              extra={"state_class": "total_increasing"},
+              value=lambda d: _cat_visits_today(d, *_rng("shlopa"))),
             # buttons
             E("start_resume_cleaning", "Start resume cleaning", "button", icon="mdi:broom",
               command=_action(DeviceAction.START, LBCommand.CLEANING)),
