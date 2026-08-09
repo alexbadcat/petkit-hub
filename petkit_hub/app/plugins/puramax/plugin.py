@@ -139,8 +139,10 @@ def _set(api_key: str, on_val=1, off_val=0):
 
 
 def _power_cmd():
+    # DeviceCommand.POWER відсутній в ACTIONS_MAP pypetkitapi → тільки CONTROL_DEVICE + power_action
     async def run(client, device, payload):
-        await client.send_api_request(device.id, DeviceCommand.POWER, 1 if payload == "ON" else 0)
+        await client.send_api_request(device.id, DeviceCommand.CONTROL_DEVICE,
+                                       {DeviceAction.POWER: 1 if payload == "ON" else 0})
     return run
 
 
@@ -221,6 +223,8 @@ class PuraMaxPlugin(PetkitPlugin):
               command=_action(DeviceAction.START, LBCommand.LIGHT)),
             E("calibrate", "Calibrate", "button", icon="mdi:scale-balance",
               command=_action(DeviceAction.START, LBCommand.CALIBRATING)),
+            E("continue_cleaning", "Continue cleaning", "button", icon="mdi:play-pause",
+              command=_action(DeviceAction.CONTINUE, LBCommand.CLEANING)),
             E("start_maintenance_mode", "Start maintenance mode", "button", icon="mdi:wrench",
               command=_action(DeviceAction.START, LBCommand.MAINTENANCE)),
             E("exit_maintenance_mode", "Exit maintenance mode", "button", icon="mdi:exit-to-app",
