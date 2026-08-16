@@ -1,6 +1,6 @@
 name: PetKit Hub
 slug: petkit_hub
-version: "0.3.0"
+version: "0.3.1"
 description: Multi-account PetKit hub with a plugin system; publishes devices to HA via MQTT discovery
 url: https://github.com/derg/petkit-hub
 arch:

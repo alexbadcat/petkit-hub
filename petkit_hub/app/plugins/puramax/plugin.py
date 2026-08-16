@@ -101,6 +101,20 @@ def _cat_visits_today(d, lo, hi):
     return n
 
 
+def _cat_avg_duration_today(d, lo, hi):
+    """Mean visit duration (s, int) over today's visits in [lo, hi) grams; 0 if none."""
+    import time
+    tzoff = (getattr(d, "timezone", 0) or 0) * 3600
+    day_start = (int((time.time() + tzoff) // 86400)) * 86400 - tzoff
+    durs = []
+    for r in getattr(d, "device_records", None) or []:
+        if _in_range(r, lo, hi) and (getattr(r, "timestamp", 0) or 0) >= day_start:
+            ti, to = _rec_content(r, "time_in"), _rec_content(r, "time_out")
+            if isinstance(ti, (int, float)) and isinstance(to, (int, float)):
+                durs.append(to - ti)
+    return round(sum(durs) / len(durs)) if durs else 0
+
+
 # --- derived values -----------------------------------------------------------
 def _state_str(d):
     st = getattr(d, "state", None)
@@ -271,6 +285,12 @@ class PuraMaxPlugin(PetkitPlugin):
             E("shlopa_visits_today", "Shlopa visits today", "sensor", icon="mdi:paw",
               extra={"state_class": "total_increasing"},
               value=lambda d: _cat_visits_today(d, *_rng("shlopa"))),
+            E("rizhik_avg_use_today", "Rizhik avg use today", "sensor", unit="s",
+              device_class="duration", extra={"state_class": "measurement"},
+              value=lambda d: _cat_avg_duration_today(d, *_rng("rizhik"))),
+            E("shlopa_avg_use_today", "Shlopa avg use today", "sensor", unit="s",
+              device_class="duration", extra={"state_class": "measurement"},
+              value=lambda d: _cat_avg_duration_today(d, *_rng("shlopa"))),
             # buttons
             E("start_resume_cleaning", "Start resume cleaning", "button", icon="mdi:broom",
               command=_action(DeviceAction.START, LBCommand.CLEANING)),
