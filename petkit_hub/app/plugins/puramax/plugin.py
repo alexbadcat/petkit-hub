@@ -132,11 +132,43 @@ def _weight_kg(d):
     return round(g / 1000, 2) if isinstance(g, (int, float)) else None
 
 
+def _work_state(d):
+    st = getattr(d, "state", None)
+    return getattr(st, "work_state", None) if st is not None else None
+
+
+def _ws_get(ws, snake, camel):
+    """work_state may be a pydantic model (snake_case attrs) or a raw dict (camelCase)."""
+    if ws is None:
+        return None
+    if isinstance(ws, dict):
+        return ws.get(camel, ws.get(snake))
+    return getattr(ws, snake, getattr(ws, camel, None))
+
+
 def _error(d):
+    # 1. real cloud error code (rarely populated)
     code = _st(d, "error_code")
-    if not code:
-        return "no_error"
-    return _st(d, "error_msg") or _st(d, "error_detail") or str(code)
+    if code:
+        return _st(d, "error_msg") or _st(d, "error_detail") or str(code)
+    # 2. The cloud leaves error_code=empty when the box STOPS mid-cycle (the physical
+    #    screen shows the error, e.g. err 2102 «pet in toileting»). The real condition
+    #    lives in work_state: work_process major 2/4 = paused/stopped, safe_warn = why.
+    #    (decoded from Jezza34000 map_work_state). This is what makes stuck boxes visible.
+    ws = _work_state(d)
+    if ws is not None:
+        wp = _ws_get(ws, "work_process", "workProcess")
+        sw = _ws_get(ws, "safe_warn", "safeWarn")
+        major = (wp // 10) if isinstance(wp, int) else None
+        if major in (2, 4):  # paused / stopped mid-cycle
+            if sw == 1:
+                return "Кіт у лотку — цикл зупинено"
+            if sw == 3:
+                return "Знято кришку / лоток не на місці — зупинено"
+            if isinstance(sw, int) and sw not in (0, 1, 3):
+                return "Помилка датчика — цикл зупинено"
+            # sw in (0, None): a normal transient pause (pet approaching/using) — not an error
+    return "no_error"
 
 
 def _n50_pct(d):
@@ -206,6 +238,18 @@ def _power_cmd():
     async def run(client, device, payload):
         await client.send_api_request(device.id, DeviceCommand.CONTROL_DEVICE,
                                        {DeviceAction.POWER: 1 if payload == "ON" else 0})
+    return run
+
+
+def _reboot_cmd(off_delay: int = 25):
+    # The ONLY remote way to unstick a hung box (accepted even in err 2102): power off→on.
+    # Each command runs in its own asyncio task (runtime._dispatch) → the sleep is safe.
+    import asyncio
+
+    async def run(client, device, _p):
+        await client.send_api_request(device.id, DeviceCommand.CONTROL_DEVICE, {DeviceAction.POWER: 0})
+        await asyncio.sleep(off_delay)
+        await client.send_api_request(device.id, DeviceCommand.CONTROL_DEVICE, {DeviceAction.POWER: 1})
     return run
 
 
@@ -304,6 +348,8 @@ class PuraMaxPlugin(PetkitPlugin):
               command=_action(DeviceAction.START, LBCommand.CALIBRATING)),
             E("continue_cleaning", "Continue cleaning", "button", icon="mdi:play-pause",
               command=_action(DeviceAction.CONTINUE, LBCommand.CLEANING)),
+            E("reboot", "Reboot", "button", icon="mdi:restart",
+              command=_reboot_cmd()),
             E("start_maintenance_mode", "Start maintenance mode", "button", icon="mdi:wrench",
               command=_action(DeviceAction.START, LBCommand.MAINTENANCE)),
             E("exit_maintenance_mode", "Exit maintenance mode", "button", icon="mdi:exit-to-app",
